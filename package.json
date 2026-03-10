@@ -1,0 +1,15 @@
+{
+  "name": "friendly-indonesia-bot",
+  "version": "3.1.0",
+  "description": "Telegram Bot AI untuk Friendly Indonesia — PPOB & Crypto",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
