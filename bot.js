@@ -422,13 +422,14 @@ bot.on("message", async (msg) => {
       return bot.sendMessage(id, "⚠️ Produk tidak tersedia saat ini. Coba lagi nanti.", mainKeyboard);
     }
 
-    // Simpan nomor ke session
+    // Simpan nomor & produk list di session
     sessions[id].__ppobNomor = nomor;
     sessions[id].__ppobStep = "pilih_produk";
+    sessions[id].__ppobProduk = produkList.slice(0, 8); // simpan di session
 
-    // Tampilkan max 8 produk
-    const displayed = produkList.slice(0, 8);
-    const btns = displayed.map(p => [{ text: `${p.product_name} — ${fmt(p.price)}`, callback_data: `ppob_confirm_${type}_${p.buyer_sku_code}_${nomor}` }]);
+    // Tampilkan max 8 produk — callback_data pakai index (pendek)
+    const displayed = sessions[id].__ppobProduk;
+    const btns = displayed.map((p, i) => [{ text: `${p.product_name} — ${fmt(p.price)}`, callback_data: `ppob_pick_${i}` }]);
     btns.push([{ text:"❌ Batal", callback_data:"back_ppob" }]);
 
     const svcNames = { pulsa:"Pulsa", data:"Paket Data", pln:"Listrik PLN", bpjs:"BPJS", game:"Top-up Game", ewallet:"E-Wallet", tv:"TV Kabel", internet:"Internet" };
@@ -577,6 +578,40 @@ bot.on("callback_query", async (query) => {
     );
   }
 
+  // ── PPOB PICK (dari index session) ──
+  if (data.startsWith("ppob_pick_")) {
+    const idx    = parseInt(data.replace("ppob_pick_", ""));
+    const type   = sessions[id]?.__ppobType;
+    const nomor  = sessions[id]?.__ppobNomor;
+    const produk = sessions[id]?.__ppobProduk?.[idx];
+    if (!produk || !nomor) return bot.sendMessage(id, "⚠️ Session expired. Mulai ulang.", mainKeyboard);
+
+    const harga = produk.price || 0;
+    const pts   = getPoints(harga);
+    const saldo = await getSaldo(id);
+    const svcNames = { pulsa:"Pulsa", data:"Paket Data", pln:"Listrik PLN", bpjs:"BPJS", game:"Top-up Game", ewallet:"E-Wallet", tv:"TV Kabel", internet:"Internet" };
+
+    // Simpan pilihan produk ke session
+    sessions[id].__ppobSku = produk.buyer_sku_code;
+
+    return bot.sendMessage(id,
+      `📋 *Konfirmasi Transaksi*\n\n` +
+      `Layanan  : *${svcNames[type] || type}*\n` +
+      `Produk   : *${produk.product_name}*\n` +
+      `Nomor    : *${nomor}*\n` +
+      `Harga    : *${fmt(harga)}*\n` +
+      `🎁 Poin  : *+${pts} poin*\n\n` +
+      `💵 Saldo : *${fmt(saldo)}*\n` +
+      `${saldo >= harga ? "✅ Saldo cukup" : "⚠️ Saldo kurang — top up dulu"}`,
+      { parse_mode:"Markdown", reply_markup:{ inline_keyboard:[
+        saldo >= harga
+          ? [{ text:"✅ Bayar Pakai Saldo", callback_data:"ppob_bayar_now" }]
+          : [{ text:"💳 Top Up Dulu", callback_data:"show_deposit" }],
+        [{ text:"❌ Batal", callback_data:"back_ppob" }]
+      ]}}
+    );
+  }
+
   // ── PPOB KONFIRMASI ──
   if (data.startsWith("ppob_confirm_")) {
     const parts = data.split("_");
@@ -615,11 +650,12 @@ bot.on("callback_query", async (query) => {
   }
 
   // ── PPOB BAYAR ──
-  if (data.startsWith("ppob_bayar_")) {
-    const parts = data.split("_");
-    const type  = parts[2];
-    const sku   = parts[3];
-    const nomor = parts[4];
+  if (data === "ppob_bayar_now" || data.startsWith("ppob_bayar_")) {
+    const type  = sessions[id]?.__ppobType;
+    const sku   = sessions[id]?.__ppobSku;
+    const nomor = sessions[id]?.__ppobNomor;
+    if (!type || !sku || !nomor) return bot.sendMessage(id, "⚠️ Session expired. Mulai ulang.", mainKeyboard);
+
     const digiKats = { pulsa:"Pulsa", data:"Data", pln:"PLN", bpjs:"BPJS", game:"Games", ewallet:"E-Money", tv:"TV", internet:"Internet" };
     const produkList = await digiGetProduk(digiKats[type] || type);
     const produk = produkList.find(p => p.buyer_sku_code === sku);
