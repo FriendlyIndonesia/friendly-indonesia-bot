@@ -4,14 +4,14 @@
 // ============================================================
 
 const TelegramBot = require("node-telegram-bot-api");
-const Anthropic   = require("@anthropic-ai/sdk");
+
 const https       = require("https");
 const http        = require("http");
 const crypto      = require("crypto");
 
 // ── CONFIG ──────────────────────────────────────────────────
 const BOT_TOKEN           = process.env.BOT_TOKEN;
-const CLAUDE_KEY          = process.env.CLAUDE_API_KEY;
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const ADMIN_ID            = process.env.ADMIN_ID;
 const DIGI_USER           = process.env.DIGIFLAZZ_USER     || "";
 const DIGI_KEY_DEV        = process.env.DIGIFLAZZ_KEY_DEV  || "";
@@ -25,7 +25,7 @@ const WEBHOOK_SECRET      = process.env.WEBHOOK_SECRET      || "friendlyindonesi
 const PORT                = process.env.PORT                || 3000;
 
 const bot    = new TelegramBot(BOT_TOKEN, { polling: true });
-const claude = new Anthropic({ apiKey: CLAUDE_KEY });
+
 
 // ── IN-MEMORY STORE (fallback kalau Supabase belum diisi) ───
 const users    = {}; // { userId: { name, points, tier, saldo, history } }
@@ -359,23 +359,27 @@ bot.on("message", async (msg) => {
     { parse_mode:"Markdown", ...mainKeyboard }
   );
 
-  // AI Chat
+  // AI Chat — Gemini
   try {
     await bot.sendChatAction(id, "typing");
     if (!sessions[id]) sessions[id] = [];
-    sessions[id].push({ role:"user", content:text });
+    sessions[id].push({ role:"user", parts:[{ text }] });
     if (sessions[id].length > 20) sessions[id] = sessions[id].slice(-20);
     const saldo = await getSaldo(id);
-    const res = await claude.messages.create({
-      model:"claude-sonnet-4-20250514", max_tokens:1000,
-      system: SYSTEM + `\nUser: ${name}, Saldo: ${fmt(saldo)}, Poin: ${user.points||0}, Tier: ${user.tier||"Bronze"}`,
-      messages: sessions[id]
+    const systemPrompt = SYSTEM + `\nUser: ${name}, Saldo: ${fmt(saldo)}, Poin: ${user.points||0}, Tier: ${user.tier||"Bronze"}`;
+    const geminiBody = JSON.stringify({
+      system_instruction: { parts:[{ text: systemPrompt }] },
+      contents: sessions[id]
     });
-    const reply = res.content[0].text;
-    sessions[id].push({ role:"assistant", content:reply });
+    const geminiRes = await fetchJSON(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+      { method:"POST", headers:{"Content-Type":"application/json"}, body: geminiBody }
+    );
+    const reply = geminiRes?.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf, tidak bisa memproses pertanyaanmu sekarang.";
+    sessions[id].push({ role:"model", parts:[{ text: reply }] });
     await bot.sendMessage(id, reply, { parse_mode:"Markdown", ...mainKeyboard });
   } catch(e) {
-    console.error(e);
+    console.error("Gemini error:", e.message);
     await bot.sendMessage(id, "⚠️ Gangguan sementara. Coba lagi ya!", mainKeyboard);
   }
 });
